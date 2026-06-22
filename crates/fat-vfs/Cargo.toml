@@ -10,4 +10,5 @@ version.workspace = true
 [dependencies]
 bitflags = "2.13.0"
 fat-hasher = { path = "../fat-hasher" }
+fs2 = "0.4.3"
 typed-path = { workspace = true }

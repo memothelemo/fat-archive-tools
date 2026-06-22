@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::{fmt, io};
 use typed_path::{Utf8TypedPath, Utf8UnixComponent, Utf8UnixPath, Utf8UnixPathBuf};
 
+mod handle;
 mod node;
 mod vfs_impl;
 
@@ -21,38 +22,6 @@ impl InMemoryFs {
             .expect("node ids should not be exhausted after ImfsNodeStore::new");
 
         Self(Arc::new(ImfsInner { nodes, root }))
-    }
-
-    /// Finds a node from a presumably normalized path.
-    #[inline(always)]
-    fn find_node(&self, path: &Utf8UnixPath) -> io::Result<Arc<Node>> {
-        let node_id = self.find_node_id(path)?;
-        self.nodes.get(node_id)
-    }
-
-    /// Finds an assigned node id from a presumably normalized path.
-    fn find_node_id(&self, path: &Utf8UnixPath) -> io::Result<NodeId> {
-        let mut current = self.root;
-
-        for component in path.components() {
-            let name = match component {
-                Utf8UnixComponent::RootDir => {
-                    current = self.root;
-                    continue;
-                }
-                Utf8UnixComponent::Normal(name) => name,
-
-                // other variants should be eliminated by normalize.
-                _ => continue,
-            };
-
-            let node = self.nodes.get(current)?;
-            current = node.as_dir()?.get(name).ok_or_else(|| {
-                io::Error::new(io::ErrorKind::NotFound, "specified path not found")
-            })?;
-        }
-
-        Ok(current)
     }
 
     /// Normalizes a [`Utf8TypedPath`] (either on Unix or Windows) to an
@@ -87,6 +56,59 @@ impl InMemoryFs {
 
         let parent = path.parent().unwrap_or_else(|| Utf8UnixPath::new("/"));
         Ok((parent, name))
+    }
+}
+
+impl ImfsInner {
+    /// Finds a node from a presumably normalized path.
+    #[inline(always)]
+    fn find_node(&self, path: &Utf8UnixPath) -> io::Result<Arc<Node>> {
+        let node_id = self.find_node_id(path)?;
+        self.nodes.get(node_id)
+    }
+
+    /// Finds an assigned node id from a presumably normalized path.
+    fn find_node_id(&self, path: &Utf8UnixPath) -> io::Result<NodeId> {
+        let mut current = self.root;
+
+        for component in path.components() {
+            let name = match component {
+                Utf8UnixComponent::RootDir => {
+                    current = self.root;
+                    continue;
+                }
+                Utf8UnixComponent::Normal(name) => name,
+
+                // other variants should be eliminated by normalize.
+                _ => continue,
+            };
+
+            let node = self.nodes.get(current)?;
+            current = node.as_dir()?.get(name).ok_or_else(|| {
+                io::Error::new(io::ErrorKind::NotFound, "specified path not found")
+            })?;
+        }
+
+        Ok(current)
+    }
+
+    fn remove_node_recursive(&self, id: NodeId) -> io::Result<()> {
+        let node = self.nodes.get(id)?;
+        match &*node {
+            Node::Directory(dir) => {
+                let children: Vec<(String, NodeId)> = dir
+                    .children
+                    .iter()
+                    .map(|entry| (entry.key().clone(), *entry.value()))
+                    .collect();
+                for (_, child_id) in children {
+                    self.remove_node_recursive(child_id)?;
+                }
+            }
+            Node::File(_) => {}
+        }
+        self.nodes.remove(id)?;
+        Ok(())
     }
 }
 

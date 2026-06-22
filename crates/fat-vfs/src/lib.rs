@@ -3,6 +3,8 @@ use fat_hasher::{Checksum, HashFunction};
 use std::{fmt, io};
 use typed_path::Utf8TypedPath;
 
+mod std_impl;
+
 /// The core virtual filesystem abstraction.
 pub trait FileSystem: fmt::Debug {
     /// Creates a new, empty directory at the provided path.
@@ -66,9 +68,25 @@ pub trait FileSystem: fmt::Debug {
     fn write(&self, path: Utf8TypedPath<'_>, contents: &[u8]) -> io::Result<()>;
 }
 
-pub trait VfsFileStream: io::Read + io::Write + io::Seek {}
+pub trait VfsFileStream: io::Read + io::Write + io::Seek {
+    /// This function sychronizes file contents from the file system.
+    fn sync_data(&mut self) -> io::Result<()>;
 
-impl<T> VfsFileStream for T where T: io::Read + io::Write + io::Seek {}
+    /// Locks the file for shared (read) access.
+    fn lock_shared(&self) -> io::Result<()>;
+
+    /// Locks the file for exclusive (write) access.
+    fn lock_exclusive(&self) -> io::Result<()>;
+
+    /// Tries to lock the file for shared (read) access without blocking.
+    fn try_lock_shared(&self) -> io::Result<()>;
+
+    /// Tries to lock the file for exclusive (write) access without blocking.
+    fn try_lock_exclusive(&self) -> io::Result<()>;
+
+    /// Releases the lock.
+    fn unlock(&self) -> io::Result<()>;
+}
 
 /// An OS-agnostic replica of [`std::fs::OpenOptions`] but all of its fields are public.
 #[derive(Clone, Debug)]
