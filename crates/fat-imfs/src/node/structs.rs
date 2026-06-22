@@ -3,10 +3,10 @@ use dashmap::DashMap;
 use fat_vfs::{Metadata, NodeType, Permissions};
 use std::{
     io,
-    sync::{Arc, RwLock, RwLockReadGuard},
+    sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
 
-use crate::store::NodeId;
+use super::NodeId;
 
 /// A file system node, either a directory or a file.
 #[derive(Debug)]
@@ -118,11 +118,6 @@ impl DirectoryNode {
         self.children.is_empty()
     }
 
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.children.len()
-    }
-
     pub fn remove(&self, name: &str) {
         self.children.remove(name);
     }
@@ -135,9 +130,41 @@ pub struct FileNode {
 }
 
 impl FileNode {
+    /// Attempts to copy the entire contents of a source node to a target node
+    /// along with its permissions.
+    pub fn copy(source: &Arc<FileNode>, target: &Arc<FileNode>) -> io::Result<()> {
+        target.replace(&source.read())?;
+        target.permissions.store(source.permissions.load());
+
+        Ok(())
+    }
+
     /// Safely reads the content of a file regardless the pointer has been poisoned.
-    pub(crate) fn read(&self) -> RwLockReadGuard<'_, Arc<Vec<u8>>> {
+    pub fn read(&self) -> RwLockReadGuard<'_, Arc<Vec<u8>>> {
         match self.content.read() {
+            Ok(content) => content,
+
+            // We have to recover it no matter what.
+            Err(error) => error.into_inner(),
+        }
+    }
+
+    pub fn replace_owned(&self, content: Vec<u8>) {
+        *self.write() = Arc::new(content);
+    }
+
+    pub fn replace(&self, content: &[u8]) -> io::Result<()> {
+        let mut vec = Vec::new();
+        vec.try_reserve(content.len())?;
+        vec.extend_from_slice(content);
+
+        self.replace_owned(vec);
+        Ok(())
+    }
+
+    /// Safely reads the content of a file regardless the pointer has been poisoned.
+    fn write(&self) -> RwLockWriteGuard<'_, Arc<Vec<u8>>> {
+        match self.content.write() {
             Ok(content) => content,
 
             // We have to recover it no matter what.

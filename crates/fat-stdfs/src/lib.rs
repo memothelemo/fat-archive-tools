@@ -89,4 +89,8 @@ impl FileSystem for OsFileSystem {
     fn soft_link(&self, _original: Utf8TypedPath<'_>, _link: Utf8TypedPath<'_>) -> io::Result<()> {
         todo!()
     }
+
+    fn write(&self, path: Utf8TypedPath<'_>, contents: &[u8]) -> io::Result<()> {
+        fs::write(path.as_str(), contents)
+    }
 }

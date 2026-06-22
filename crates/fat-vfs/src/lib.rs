@@ -58,6 +58,12 @@ pub trait FileSystem: fmt::Debug {
 
     /// Creates a new symbolic link on the file system.
     fn soft_link(&self, original: Utf8TypedPath<'_>, link: Utf8TypedPath<'_>) -> io::Result<()>;
+
+    /// Writes a slice as the entire contents of a file.
+    ///
+    /// This function will create a file if it does not exist, and will
+    /// entirely replace its contents if it does.
+    fn write(&self, path: Utf8TypedPath<'_>, contents: &[u8]) -> io::Result<()>;
 }
 
 pub trait VfsFileStream: io::Read + io::Write + io::Seek {}

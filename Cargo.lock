@@ -133,6 +133,7 @@ name = "fat"
 version = "0.1.0"
 dependencies = [
  "fat-hasher",
+ "fat-imfs",
  "fat-stdfs",
  "fat-vfs",
 ]

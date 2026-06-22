@@ -11,12 +11,12 @@ pub struct NodeId {
     generation: u32,
 }
 
-/// A concurrent generational arena for filesystem nodes.
+/// A concurrent generational arena for file system nodes.
 ///
 /// It uses [`DashMap`] for per-shard locking with a lock-free free list
 /// ([`SegQueue`]) for index recycling.
 #[derive(Debug)]
-pub struct ImfsNodeStore {
+pub struct NodeStore {
     nodes: DashMap<usize, NodeSlot>,
 
     /// Indices to recycle if an existing node is deleted.
@@ -28,13 +28,13 @@ pub struct ImfsNodeStore {
     next_idx: AtomicCell<usize>,
 }
 
-impl Default for ImfsNodeStore {
+impl Default for NodeStore {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl ImfsNodeStore {
+impl NodeStore {
     /// Creates an empty node store.
     #[must_use]
     pub fn new() -> Self {

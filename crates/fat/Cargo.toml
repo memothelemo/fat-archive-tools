@@ -9,5 +9,6 @@ version.workspace = true
 
 [dependencies]
 fat-hasher = { path = "../fat-hasher" }
+fat-imfs = { path = "../fat-imfs" }
 fat-stdfs = { path = "../fat-stdfs" }
 fat-vfs = { path = "../fat-vfs" }
