@@ -1,0 +1,17 @@
+[package]
+name = "fat-hasher"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+hex = { workspace = true }
+sha2 = "0.11.0"
+thiserror = { workspace = true }
+
+[dependencies.xxhash-rust]
+version = "0.8.15"
+features = ["xxh3"]

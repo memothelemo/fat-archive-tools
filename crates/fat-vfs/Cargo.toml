@@ -1,0 +1,13 @@
+[package]
+name = "fat-vfs"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+bitflags = "2.13.0"
+fat-hasher = { path = "../fat-hasher" }
+typed-path = { workspace = true }
