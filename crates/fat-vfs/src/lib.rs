@@ -71,21 +71,6 @@ pub trait FileSystem: fmt::Debug {
 pub trait VfsFileStream: io::Read + io::Write + io::Seek {
     /// This function sychronizes file contents from the file system.
     fn sync_data(&mut self) -> io::Result<()>;
-
-    /// Locks the file for shared (read) access.
-    fn lock_shared(&self) -> io::Result<()>;
-
-    /// Locks the file for exclusive (write) access.
-    fn lock_exclusive(&self) -> io::Result<()>;
-
-    /// Tries to lock the file for shared (read) access without blocking.
-    fn try_lock_shared(&self) -> io::Result<()>;
-
-    /// Tries to lock the file for exclusive (write) access without blocking.
-    fn try_lock_exclusive(&self) -> io::Result<()>;
-
-    /// Releases the lock.
-    fn unlock(&self) -> io::Result<()>;
 }
 
 /// An OS-agnostic replica of [`std::fs::OpenOptions`] but all of its fields are public.

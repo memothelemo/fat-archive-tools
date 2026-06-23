@@ -91,25 +91,6 @@ impl ImfsInner {
 
         Ok(current)
     }
-
-    fn remove_node_recursive(&self, id: NodeId) -> io::Result<()> {
-        let node = self.nodes.get(id)?;
-        match &*node {
-            Node::Directory(dir) => {
-                let children: Vec<(String, NodeId)> = dir
-                    .children
-                    .iter()
-                    .map(|entry| (entry.key().clone(), *entry.value()))
-                    .collect();
-                for (_, child_id) in children {
-                    self.remove_node_recursive(child_id)?;
-                }
-            }
-            Node::File(_) => {}
-        }
-        self.nodes.remove(id)?;
-        Ok(())
-    }
 }
 
 impl Default for InMemoryFs {

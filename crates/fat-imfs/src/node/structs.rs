@@ -3,7 +3,7 @@ use dashmap::DashMap;
 use fat_vfs::{Metadata, NodeType, Permissions};
 use std::{
     io,
-    sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard, Mutex, Condvar},
+    sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
 
 use super::NodeId;
@@ -31,11 +31,6 @@ impl Node {
         Self::File(FileNode {
             content: RwLock::new(Arc::default()),
             permissions: AtomicCell::new(Permissions::READ_WRITE),
-            lock_state: Mutex::new(FileLockState {
-                shared_count: 0,
-                has_exclusive: false,
-            }),
-            lock_cond: Condvar::new(),
         })
     }
 
@@ -87,6 +82,14 @@ impl Node {
             Self::File(file) => file.permissions.load(),
         }
     }
+
+    /// Sets the permission bits for this node.
+    pub fn set_permissions(&self, permissions: Permissions) {
+        match self {
+            Self::Directory(dir) => dir.permissions.store(permissions),
+            Self::File(file) => file.permissions.store(permissions),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -120,19 +123,10 @@ impl DirectoryNode {
     }
 }
 
-/// The concurrent lock state of a file node, tracking shared locks and exclusive locks.
-#[derive(Debug)]
-pub struct FileLockState {
-    pub(crate) shared_count: usize,
-    pub(crate) has_exclusive: bool,
-}
-
 #[derive(Debug)]
 pub struct FileNode {
     pub(crate) content: RwLock<Arc<Vec<u8>>>,
     pub(crate) permissions: AtomicCell<Permissions>,
-    pub(crate) lock_state: Mutex<FileLockState>,
-    pub(crate) lock_cond: Condvar,
 }
 
 impl FileNode {
@@ -176,66 +170,6 @@ impl FileNode {
 
             // We have to recover it no matter what.
             Err(error) => error.into_inner(),
-        }
-    }
-
-    pub fn lock_shared(&self) -> io::Result<()> {
-        let mut state = self.lock_state.lock().unwrap();
-        while state.has_exclusive {
-            state = self.lock_cond.wait(state).unwrap();
-        }
-        state.shared_count += 1;
-        Ok(())
-    }
-
-    pub fn try_lock_shared(&self) -> io::Result<()> {
-        let mut state = self.lock_state.lock().unwrap();
-        if state.has_exclusive {
-            return Err(io::Error::new(io::ErrorKind::WouldBlock, "file is exclusively locked"));
-        }
-        state.shared_count += 1;
-        Ok(())
-    }
-
-    pub fn lock_exclusive(&self) -> io::Result<()> {
-        let mut state = self.lock_state.lock().unwrap();
-        while state.has_exclusive || state.shared_count > 0 {
-            state = self.lock_cond.wait(state).unwrap();
-        }
-        state.has_exclusive = true;
-        Ok(())
-    }
-
-    pub fn try_lock_exclusive(&self) -> io::Result<()> {
-        let mut state = self.lock_state.lock().unwrap();
-        if state.has_exclusive || state.shared_count > 0 {
-            return Err(io::Error::new(io::ErrorKind::WouldBlock, "file is already locked"));
-        }
-        state.has_exclusive = true;
-        Ok(())
-    }
-
-    pub fn unlock_shared(&self) -> io::Result<()> {
-        let mut state = self.lock_state.lock().unwrap();
-        if state.shared_count > 0 {
-            state.shared_count -= 1;
-            if state.shared_count == 0 {
-                self.lock_cond.notify_all();
-            }
-            Ok(())
-        } else {
-            Err(io::Error::new(io::ErrorKind::Other, "no shared lock held to unlock"))
-        }
-    }
-
-    pub fn unlock_exclusive(&self) -> io::Result<()> {
-        let mut state = self.lock_state.lock().unwrap();
-        if state.has_exclusive {
-            state.has_exclusive = false;
-            self.lock_cond.notify_all();
-            Ok(())
-        } else {
-            Err(io::Error::new(io::ErrorKind::Other, "no exclusive lock held to unlock"))
         }
     }
 }
