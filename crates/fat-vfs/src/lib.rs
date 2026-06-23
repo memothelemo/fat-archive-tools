@@ -1,9 +1,14 @@
 use bitflags::bitflags;
 use fat_hasher::{Checksum, HashFunction};
-use std::{fmt, io};
-use typed_path::Utf8TypedPath;
+use serde::{Deserialize, Serialize};
+use typed_path::{Utf8TypedPath, Utf8TypedPathBuf};
 
-mod std_impl;
+use ::std::{fmt, io};
+
+pub mod snapshot;
+pub mod std;
+
+pub use self::{snapshot::VfsSnapshotNode, std::OsFileSystem};
 
 /// The core virtual filesystem abstraction.
 pub trait FileSystem: fmt::Debug {
@@ -37,11 +42,34 @@ pub trait FileSystem: fmt::Debug {
         options: &mut OpenOptions,
     ) -> io::Result<Box<dyn VfsFileStream>>;
 
+    /// Reads the entire contents of a file into a byte vector.
+    ///
+    /// It should replicate the behavior of [`std::fs::read`].
+    fn read(&self, path: Utf8TypedPath<'_>) -> io::Result<Vec<u8>>;
+
+    /// Returns an iterator over the entries within a directory.
+    ///
+    /// It should replicate the behavior of [`std::fs::read_dir`].
+    fn read_dir(
+        &self,
+        path: Utf8TypedPath<'_>,
+    ) -> io::Result<Box<dyn Iterator<Item = io::Result<Utf8TypedPathBuf>>>>;
+
+    /// Reads the entire contents of a file into a string.
+    ///
+    /// It should replicate the behavior of [`std::fs::read_to_string`].
+    fn read_to_string(&self, path: Utf8TypedPath<'_>) -> io::Result<String>;
+
     /// Renames a file or directory to a new name, replacing the original file
     /// if `to` already exists.
     ///
     /// It should replicate the behavior of [`std::fs::rename`].
     fn rename(&self, from: Utf8TypedPath<'_>, to: Utf8TypedPath<'_>) -> io::Result<()>;
+
+    /// Removes an empty file.
+    ///
+    /// It should replicate the behavior of [`std::fs::remove_file`].
+    fn remove_file(&self, path: Utf8TypedPath<'_>) -> io::Result<()>;
 
     /// Removes an empty directory.
     ///
@@ -59,16 +87,23 @@ pub trait FileSystem: fmt::Debug {
     fn set_permissions(&self, path: Utf8TypedPath<'_>, permissions: Permissions) -> io::Result<()>;
 
     /// Creates a new symbolic link on the file system.
+    ///
+    /// It should replicate the behavior of [`std::fs::soft_link`].
     fn soft_link(&self, original: Utf8TypedPath<'_>, link: Utf8TypedPath<'_>) -> io::Result<()>;
 
     /// Writes a slice as the entire contents of a file.
     ///
     /// This function will create a file if it does not exist, and will
     /// entirely replace its contents if it does.
+    ///
+    /// It should replicate the behavior of [`std::fs::write`].
     fn write(&self, path: Utf8TypedPath<'_>, contents: &[u8]) -> io::Result<()>;
 }
 
 pub trait VfsFileStream: io::Read + io::Write + io::Seek {
+    /// Queries metadata about the underlying file.
+    fn metadata(&self) -> io::Result<Metadata>;
+
     /// This function sychronizes file contents from the file system.
     fn sync_data(&mut self) -> io::Result<()>;
 }
@@ -179,7 +214,7 @@ pub enum NodeType {
 
 bitflags! {
     /// A file system node permission.
-    #[derive(Clone, Copy, Debug)]
+    #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
     pub struct Permissions: u16 {
         /// This node has read permission.
         const READ = 0b10;

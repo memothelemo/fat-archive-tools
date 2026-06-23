@@ -8,7 +8,8 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-bitflags = "2.13.0"
+bitflags = { version = "2.13.0", features = ["serde"] }
 fat-hasher = { path = "../fat-hasher" }
 fs2 = "0.4.3"
+serde = { workspace = true }
 typed-path = { workspace = true }

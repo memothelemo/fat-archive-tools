@@ -7,8 +7,8 @@ use crate::Node;
 /// A generational handle to a node in the store.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NodeId {
-    index: usize,
-    generation: u32,
+    pub(crate) index: usize,
+    pub(crate) generation: u32,
 }
 
 /// A concurrent generational arena for file system nodes.

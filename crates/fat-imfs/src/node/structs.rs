@@ -69,7 +69,6 @@ impl Node {
     }
 
     /// Returns the permission set for this node.
-    #[allow(dead_code)]
     #[must_use]
     pub fn permissions(&self) -> NodePermissions {
         match self {
@@ -83,14 +82,6 @@ impl Node {
         match self {
             Self::Directory(..) => NodeType::Directory,
             Self::File(..) => NodeType::File,
-        }
-    }
-
-    /// Clears the node parent for this node.
-    pub fn clear_parent(&self) {
-        match self {
-            Self::Directory(dir) => dir.parent.store(None),
-            Self::File(file) => file.parent.store(None),
         }
     }
 
