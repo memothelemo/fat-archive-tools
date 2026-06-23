@@ -1,6 +1,6 @@
 use crossbeam::atomic::AtomicCell;
 use dashmap::DashMap;
-use fat_vfs::{Metadata, NodeType, Permissions};
+use fat_vfs::{NodeType, Permissions};
 use std::{
     io,
     sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
@@ -21,7 +21,8 @@ impl Node {
     pub fn empty_dir() -> Self {
         Self::Directory(DirectoryNode {
             children: DashMap::new(),
-            permissions: AtomicCell::new(Permissions::READ_WRITE),
+            parent: AtomicCell::new(None),
+            permissions: AtomicCell::new(NodePermissions::Inherited),
         })
     }
 
@@ -30,7 +31,8 @@ impl Node {
     pub fn empty_file() -> Self {
         Self::File(FileNode {
             content: RwLock::new(Arc::default()),
-            permissions: AtomicCell::new(Permissions::READ_WRITE),
+            parent: AtomicCell::new(None),
+            permissions: AtomicCell::new(NodePermissions::Inherited),
         })
     }
 
@@ -56,35 +58,52 @@ impl Node {
         }
     }
 
-    /// Returns the metadata for this node.
+    /// Returns the parent of this node.
+    #[allow(dead_code)]
     #[must_use]
-    pub fn metadata(&self) -> Metadata {
+    pub fn parent(&self) -> Option<NodeId> {
         match self {
-            Self::Directory(inner) => Metadata {
-                mode: inner.permissions.load(),
-                size: 0,
-                ty: NodeType::Directory,
-            },
-            Self::File(file) => Metadata {
-                mode: file.permissions.load(),
-                size: u64::try_from(file.read().len()).unwrap_or(u64::MAX),
-                ty: NodeType::File,
-            },
+            Self::Directory(dir) => dir.parent.load(),
+            Self::File(file) => file.parent.load(),
         }
     }
 
-    /// Returns the permission bits for this node.
+    /// Returns the permission set for this node.
     #[allow(dead_code)]
     #[must_use]
-    pub fn permissions(&self) -> Permissions {
+    pub fn permissions(&self) -> NodePermissions {
         match self {
             Self::Directory(dir) => dir.permissions.load(),
             Self::File(file) => file.permissions.load(),
         }
     }
 
-    /// Sets the permission bits for this node.
-    pub fn set_permissions(&self, permissions: Permissions) {
+    /// Gets the node type.
+    pub fn ty(&self) -> NodeType {
+        match self {
+            Self::Directory(..) => NodeType::Directory,
+            Self::File(..) => NodeType::File,
+        }
+    }
+
+    /// Clears the node parent for this node.
+    pub fn clear_parent(&self) {
+        match self {
+            Self::Directory(dir) => dir.parent.store(None),
+            Self::File(file) => file.parent.store(None),
+        }
+    }
+
+    /// Sets the node parent for this node.
+    pub fn set_parent(&self, parent: NodeId) {
+        match self {
+            Self::Directory(dir) => dir.parent.store(Some(parent)),
+            Self::File(file) => file.parent.store(Some(parent)),
+        }
+    }
+
+    /// Sets the permissions for this node.
+    pub fn set_permissions(&self, permissions: NodePermissions) {
         match self {
             Self::Directory(dir) => dir.permissions.store(permissions),
             Self::File(file) => file.permissions.store(permissions),
@@ -92,10 +111,21 @@ impl Node {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum NodePermissions {
+    /// This node has explictly set permissions.
+    Set(Permissions),
+
+    /// This node has no permissions set, therefore its permissions
+    /// are inherited from its ancestors.
+    Inherited,
+}
+
 #[derive(Debug)]
 pub struct DirectoryNode {
     pub(crate) children: DashMap<String, NodeId>,
-    pub(crate) permissions: AtomicCell<Permissions>,
+    pub(crate) parent: AtomicCell<Option<NodeId>>,
+    pub(crate) permissions: AtomicCell<NodePermissions>,
 }
 
 impl DirectoryNode {
@@ -126,7 +156,8 @@ impl DirectoryNode {
 #[derive(Debug)]
 pub struct FileNode {
     pub(crate) content: RwLock<Arc<Vec<u8>>>,
-    pub(crate) permissions: AtomicCell<Permissions>,
+    pub(crate) parent: AtomicCell<Option<NodeId>>,
+    pub(crate) permissions: AtomicCell<NodePermissions>,
 }
 
 impl FileNode {
