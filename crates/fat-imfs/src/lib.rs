@@ -1,5 +1,5 @@
 use fat_vfs::{Metadata, NodeType, Permissions, VfsSnapshotNode};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use std::{fmt, io};
 use typed_path::{Utf8TypedPath, Utf8UnixComponent, Utf8UnixPath, Utf8UnixPathBuf};
@@ -30,6 +30,9 @@ impl InMemoryFs {
         }
     }
 
+    /// Applies the snapshot to the in-memory file system.
+    ///
+    /// Any existing files will be wiped before it is inserted or updated.
     pub fn apply_snapshot(&self, snapshot: &VfsSnapshotNode) -> io::Result<()> {
         let VfsSnapshotNode::Directory {
             children,
@@ -59,6 +62,11 @@ impl InMemoryFs {
         Ok(())
     }
 
+    /// Creates a snapshot based on the contents of the in-memory file system.
+    pub fn generate_snapshot(&self) -> io::Result<VfsSnapshotNode> {
+        self.generate_snapshot_inner(Utf8UnixPath::new("/"))
+    }
+
     /// Sets the permissions from a specified path recursively.
     #[inline(always)]
     pub fn set_permissions_recursive(
@@ -68,10 +76,50 @@ impl InMemoryFs {
     ) -> io::Result<()> {
         self.inner.set_permissions_recursive(path, permissions)
     }
+
+    /// Wipes the entire in-memory file system.
+    pub fn wipe(&self) -> io::Result<()> {
+        // TODO: Prevent all nodes from wiping if there are files opened.
+        self.inner.nodes.clear(self.inner.root);
+        Ok(())
+    }
 }
 
 impl InMemoryFs {
+    /// Generates a snapshot node from a target path.
+    #[inline(always)]
+    fn generate_snapshot_inner(&self, path: &Utf8UnixPath) -> io::Result<VfsSnapshotNode> {
+        let (node, node_id) = self.inner.find_node(path)?;
+        let permissions = self.inner.resolve_permissions(node_id)?;
+
+        match &*node {
+            Node::Directory(dir) => {
+                let mut children = BTreeMap::new();
+                for entry in dir.children.iter() {
+                    let path = path.join(entry.key());
+                    let node = self.generate_snapshot_inner(&path)?;
+                    children.insert(entry.key().to_string(), node);
+                }
+
+                Ok(VfsSnapshotNode::Directory {
+                    children,
+                    permissions,
+                })
+            }
+            Node::File(file) => {
+                let mut data = Vec::new();
+                let content = file.read();
+                data.try_reserve(content.len())?;
+                data.extend_from_slice(&*content);
+
+                drop(content);
+                Ok(VfsSnapshotNode::File { data, permissions })
+            }
+        }
+    }
+
     /// Applies [`VfsSnapshotNode`] to a target path.
+    #[inline(always)]
     fn apply_snapshot_inner(&self, path: &Utf8UnixPath, node: &VfsSnapshotNode) -> io::Result<()> {
         let permissions = match node {
             VfsSnapshotNode::File {

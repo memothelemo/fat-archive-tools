@@ -45,6 +45,23 @@ impl NodeStore {
         }
     }
 
+    /// Vacates every node slot stored temporarily in the store excluding
+    /// the root node ID provided in the parameter.
+    pub fn clear(&self, root: NodeId) {
+        for mut entry in self.nodes.iter_mut() {
+            let idx = *entry.key();
+            let slot = entry.value_mut();
+            let generation = slot.generation;
+
+            if idx == root.index && generation == root.generation {
+                continue;
+            }
+
+            slot.take();
+            self.free_list.push(idx);
+        }
+    }
+
     /// Retrieves a node by its [`NodeId`].
     ///
     /// Returns an error if the handle is stale or the node doesn't exist.

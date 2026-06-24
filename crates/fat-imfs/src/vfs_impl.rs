@@ -46,6 +46,12 @@ impl FileSystem for InMemoryFs {
 
     fn exists(&self, path: Utf8TypedPath<'_>) -> io::Result<bool> {
         let path = Self::normalize(path)?;
+        let (parent, ..) = Self::split_parent(&path)?;
+        let parent_node_id = self.inner.find_node_id(parent)?;
+
+        self.inner
+            .check_for_read(parent_node_id, NodeType::Directory)?;
+
         match self.inner.find_node_id(&path) {
             Ok(..) => Ok(true),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
