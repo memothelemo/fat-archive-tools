@@ -13,6 +13,7 @@ version = "0.1.0"
 [workspace.dependencies]
 crossbeam = "0.8.4"
 dashmap = "6.2.1"
+divan = "0.1.21"
 hex = "0.4.3"
 mockall = "0.14.0"
 serde = { version = "1.0.228", features = ["derive"] }

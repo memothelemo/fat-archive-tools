@@ -12,7 +12,6 @@ pub trait FileSystem: Any + Send + Sync + fmt::Debug {
     fn create_dir(&self, path: Utf8TypedPath<'_>) -> io::Result<()>;
     fn create_dir_all(&self, path: Utf8TypedPath<'_>) -> io::Result<()>;
     fn exists(&self, path: Utf8TypedPath<'_>) -> io::Result<bool>;
-    fn join(&self, path: Utf8TypedPath<'_>, name: &str) -> io::Result<Utf8TypedPathBuf>;
 
     /// Calculates a checksum from the contents of a file.
     fn hash(&self, path: Utf8TypedPath<'_>, hasher: Box<dyn HashFunction>) -> io::Result<Checksum>;

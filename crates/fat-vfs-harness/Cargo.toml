@@ -1,5 +1,5 @@
 [package]
-name = "fat"
+name = "fat-vfs-harness"
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,9 +8,5 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-crossbeam = { workspace = true }
-fat-imfs = { path = "../fat-imfs" }
-fat-stdfs = { path = "../fat-stdfs" }
 fat-vfs = { path = "../fat-vfs" }
-fat-vfs-harness = { path = "../fat-vfs-harness" }
 typed-path = { workspace = true }

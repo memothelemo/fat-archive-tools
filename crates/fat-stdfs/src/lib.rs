@@ -70,11 +70,6 @@ impl FileSystem for OsFileSystem {
         Ok(hasher.digest())
     }
 
-    fn join(&self, path: Utf8TypedPath<'_>, name: &str) -> io::Result<Utf8TypedPathBuf> {
-        ensure_path_is_absolute!(path);
-        path.join_checked(name).map_err(io::Error::other)
-    }
-
     fn metadata(&self, path: Utf8TypedPath<'_>) -> io::Result<fat_vfs::VfsMetadata> {
         ensure_path_is_absolute!(path);
         Ok(fs::metadata(path.as_str())?.to_vfs())

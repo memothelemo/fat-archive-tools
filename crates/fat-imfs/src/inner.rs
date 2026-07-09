@@ -38,7 +38,7 @@ impl ImfsInner {
     }
 
     /// Implementation of [`std::fs::create_dir`] but for in-memory file system.
-    pub fn create_dir(&self, target: &Utf8UnixPath) -> io::Result<()> {
+    pub(crate) fn create_dir(&self, target: &Utf8UnixPath) -> io::Result<()> {
         let (parent, target_name) = self.require_file_name(target)?;
 
         let (parent, parent_id) = self.find_node(parent)?;
@@ -57,7 +57,7 @@ impl ImfsInner {
     }
 
     /// Implementation of [`std::fs::create_dir`] but for in-memory file system.
-    pub fn create_dir_all(&self, target: &Utf8UnixPath) -> io::Result<()> {
+    pub(crate) fn create_dir_all(&self, target: &Utf8UnixPath) -> io::Result<()> {
         let mut current = self.root;
         for component in target.iter() {
             if component == SEPARATOR_STR {
@@ -105,7 +105,7 @@ impl ImfsInner {
     }
 
     /// Removes all node's descendants.
-    pub fn remove_all_descendants(&self, node_id: NodeId) -> io::Result<()> {
+    pub(crate) fn remove_all_descendants(&self, node_id: NodeId) -> io::Result<()> {
         let node = self.nodes.get(node_id)?;
         let Node::Directory(directory) = &*node else {
             return Ok(());
@@ -146,7 +146,7 @@ impl ImfsInner {
 
     /// Removes the directory from the specified path regardless if
     /// the directory has children or not.
-    pub fn remove_dir(&self, target: &Utf8UnixPath) -> io::Result<()> {
+    pub(crate) fn remove_dir(&self, target: &Utf8UnixPath) -> io::Result<()> {
         if target == SEPARATOR_STR {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
@@ -171,7 +171,7 @@ impl ImfsInner {
     }
 
     /// Implementation of [`std::fs::remove_file`] but for in-memory file system.
-    pub fn remove_file(&self, target: &Utf8UnixPath) -> io::Result<()> {
+    pub(crate) fn remove_file(&self, target: &Utf8UnixPath) -> io::Result<()> {
         let (parent, target_name) = self.require_file_name(target)?;
         let (parent, parent_node_id) = self.find_node(parent)?;
 
@@ -202,7 +202,7 @@ impl ImfsInner {
     }
 
     /// Renames a file to a new name, replacing the original file if `to` already exists.
-    pub fn rename_file(&self, from: &Utf8UnixPath, to: &Utf8UnixPath) -> io::Result<()> {
+    pub(crate) fn rename_file(&self, from: &Utf8UnixPath, to: &Utf8UnixPath) -> io::Result<()> {
         if from == to {
             return Ok(());
         }
@@ -264,7 +264,7 @@ impl ImfsInner {
     }
 
     /// Sets the permissions recursively from a specific path.
-    pub fn set_permissions_recursive(
+    pub(crate) fn set_permissions_recursive(
         &self,
         target: &Utf8UnixPath,
         permissions: Permissions,
@@ -314,7 +314,7 @@ impl ImfsInner {
     }
 
     /// Implementation of [`std::fs::write`] but for in-memory file system.
-    pub fn write(&self, target: &Utf8UnixPath, contents: &[u8]) -> io::Result<()> {
+    pub(crate) fn write(&self, target: &Utf8UnixPath, contents: &[u8]) -> io::Result<()> {
         let (parent, target_name) = self.require_file_name(target)?;
 
         // Make sure its parent directory exists
@@ -359,7 +359,7 @@ impl ImfsInner {
     ///
     /// This function assumes that the parent is not referencing back
     /// to the tree that it may be cyclic.
-    pub fn add_node(
+    pub(crate) fn add_node(
         &self,
         parent: &DirectoryNode,
         parent_id: NodeId,
@@ -481,18 +481,38 @@ impl ImfsInner {
 pub struct ImfsDirEntry {
     pub(crate) depth: usize,
     pub(crate) fs: Arc<ImfsInner>,
+    pub(crate) node_id: NodeId,
     pub(crate) path: Utf8UnixPathBuf,
 }
 
 impl ImfsDirEntry {
     #[must_use]
-    pub fn base(fs: Arc<ImfsInner>, path: Utf8UnixPathBuf) -> Box<dyn VfsDirEntry> {
-        Box::new(Self { depth: 0, fs, path })
+    pub fn base(
+        fs: Arc<ImfsInner>,
+        node_id: NodeId,
+        path: Utf8UnixPathBuf,
+    ) -> Box<dyn VfsDirEntry> {
+        Box::new(Self {
+            depth: 0,
+            fs,
+            node_id,
+            path,
+        })
     }
 
     #[must_use]
-    pub fn nested(depth: usize, fs: Arc<ImfsInner>, path: Utf8UnixPathBuf) -> Box<dyn VfsDirEntry> {
-        Box::new(Self { depth, fs, path })
+    pub fn nested(
+        depth: usize,
+        fs: Arc<ImfsInner>,
+        node_id: NodeId,
+        path: Utf8UnixPathBuf,
+    ) -> Box<dyn VfsDirEntry> {
+        Box::new(Self {
+            depth,
+            fs,
+            node_id,
+            path,
+        })
     }
 }
 
@@ -509,12 +529,12 @@ impl VfsDirEntry for ImfsDirEntry {
     }
 
     fn metadata(&self) -> io::Result<VfsMetadata> {
-        let node_id = self.fs.find_node_id(&self.path)?;
-        self.fs.metadata(node_id)
+        self.fs.metadata(self.node_id)
     }
 
     fn node_type(&self) -> io::Result<VfsNodeType> {
-        self.metadata().map(|v| v.ty)
+        let node = self.fs.nodes.get(self.node_id)?;
+        Ok(node.ty())
     }
 
     fn path(&self) -> Utf8TypedPath<'_> {
@@ -572,7 +592,7 @@ impl ImfsWalkDir {
             .map(|entry| (entry.key().clone(), *entry.value()))
             .collect();
 
-        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        entries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
         // Push children in reverse order so they are popped in alphabetical order.
         let parent_path = Arc::new(path);
@@ -611,6 +631,11 @@ impl Iterator for ImfsWalkDir {
             self.deferred_error = Some(error);
         }
 
-        Some(Ok(ImfsDirEntry::nested(node.depth, self.fs.clone(), path)))
+        Some(Ok(ImfsDirEntry::nested(
+            node.depth,
+            self.fs.clone(),
+            node.id,
+            path,
+        )))
     }
 }

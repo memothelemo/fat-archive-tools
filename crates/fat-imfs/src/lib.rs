@@ -7,7 +7,7 @@ use typed_path::{Utf8TypedPath, Utf8TypedPathBuf};
 
 use self::{
     handle::{FileReadHandle, FileWriteHandle, OpenFileMode},
-    inner::{ImfsDirEntry, ImfsInner, ImfsNodeOperation, ImfsWalkDir},
+    inner::{ImfsDirEntry, ImfsInner, ImfsWalkDir},
     node::*,
 };
 
@@ -16,7 +16,11 @@ mod inner;
 mod node;
 mod snapshot;
 
-pub use self::snapshot::{ImfsDirectoryBuilder, ImfsSnapshotNode};
+pub use self::{
+    inner::ImfsNodeOperation,
+    node::{NodeId, NodeStore},
+    snapshot::{ImfsDirectoryBuilder, ImfsSnapshotNode},
+};
 
 /// An ephemeral, concurrent in-memory filesystem.
 #[derive(Clone)]
@@ -31,6 +35,18 @@ impl InMemoryFs {
         Self {
             inner: Arc::new(ImfsInner::empty()),
         }
+    }
+
+    /// Gets the reference of the [`ImfsInner`] for diagnostic purposes.
+    #[must_use]
+    pub fn inner(&self) -> &ImfsInner {
+        &self.inner
+    }
+
+    /// Gets the reference of the [`NodeStore`].
+    #[must_use]
+    pub fn node_store(&self) -> &NodeStore {
+        &self.inner.nodes
     }
 
     /// Gets the total active nodes of this in-memory file system.
@@ -137,14 +153,6 @@ impl FileSystem for InMemoryFs {
 
         hasher.update(&content);
         Ok(hasher.digest())
-    }
-
-    fn join(&self, path: Utf8TypedPath<'_>, name: &str) -> io::Result<Utf8TypedPathBuf> {
-        self.inner
-            .normalize(path)?
-            .join_checked(name)
-            .map_err(io::Error::other)
-            .map(Utf8TypedPathBuf::Unix)
     }
 
     fn metadata(&self, target: Utf8TypedPath<'_>) -> io::Result<VfsMetadata> {
@@ -256,7 +264,7 @@ impl FileSystem for InMemoryFs {
             let entry = self
                 .inner
                 .check_perms(entry_id, ImfsNodeOperation::Read)
-                .map(|_| ImfsDirEntry::base(self.inner.clone(), path.join(entry.key())));
+                .map(|_| ImfsDirEntry::base(self.inner.clone(), entry_id, path.join(entry.key())));
 
             entries.push(entry);
         }
