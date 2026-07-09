@@ -16,16 +16,6 @@ serde = { workspace = true }
 typed-path = { workspace = true }
 
 [dev-dependencies]
-divan = { workspace = true }
-fat-vfs-harness = { path = "../fat-vfs-harness" }
 pretty_assertions = "1.4.1"
 serde = { workspace = true }
 serde_json = "1.0.150"
-
-[[bench]]
-name = "imfs_inner"
-harness = false
-
-[[bench]]
-name = "walkdir"
-harness = false

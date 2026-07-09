@@ -104,6 +104,49 @@ impl ImfsInner {
         Ok(path)
     }
 
+    /// Implementation of [`std::fs::read_dir`] but for in-memory file system.
+    pub(crate) fn read_dir(
+        this: &Arc<ImfsInner>,
+        target: &Utf8UnixPath,
+    ) -> io::Result<std::vec::IntoIter<io::Result<ImfsDirEntry>>> {
+        let (node, node_id) = this.find_node(target)?;
+        let directory = node.as_dir()?;
+
+        // This is to reduce the computational time of resolving permissions
+        // per children from its parent directory.
+        let parent_permissions = this.permissions(node_id)?;
+        if !parent_permissions.can_read() {
+            return Err(Self::could_not_access(&node));
+        }
+
+        let mut entries = Vec::new();
+        entries.try_reserve(directory.children.len())?;
+
+        for entry in directory.children.iter() {
+            let entry_id = *entry.value();
+            let entry_node = this.nodes.get(entry_id)?;
+
+            let entry_permissions = match entry_node.permissions() {
+                NodePermissions::Set(value) => value & parent_permissions,
+                NodePermissions::Inherited => parent_permissions,
+            };
+
+            let entry = if entry_permissions.can_read() {
+                Ok(ImfsDirEntry::new(
+                    this.clone(),
+                    entry_id,
+                    target.join(entry.key()),
+                ))
+            } else {
+                Err(Self::could_not_access(&entry_node))
+            };
+
+            entries.push(entry);
+        }
+
+        Ok(entries.into_iter())
+    }
+
     /// Removes all node's descendants.
     pub(crate) fn remove_all_descendants(&self, node_id: NodeId) -> io::Result<()> {
         let node = self.nodes.get(node_id)?;
@@ -385,16 +428,22 @@ impl ImfsInner {
 
         if !can_operate_this {
             let node = self.nodes.get(node_id)?;
-            let message = match node.ty() {
-                VfsNodeType::Directory => "could not access directory",
-                VfsNodeType::File => "could not access file",
-                VfsNodeType::Symlink => "could not access symlink",
-                VfsNodeType::Unknown => "could not access unknown in-memory file system node",
-            };
-            return Err(io::Error::new(io::ErrorKind::PermissionDenied, message));
+            return Err(Self::could_not_access(&node));
         }
 
         Ok(())
+    }
+
+    /// Creates "could not access" error message based on the specified node.
+    #[inline(always)]
+    pub(crate) fn could_not_access(node: &Node) -> io::Error {
+        let message = match node.ty() {
+            VfsNodeType::Directory => "could not access directory",
+            VfsNodeType::File => "could not access file",
+            VfsNodeType::Symlink => "could not access symlink",
+            VfsNodeType::Unknown => "could not access unknown in-memory file system node",
+        };
+        io::Error::new(io::ErrorKind::PermissionDenied, message)
     }
 
     /// Resolves node metadata from a node ID.
@@ -487,32 +536,13 @@ pub struct ImfsDirEntry {
 
 impl ImfsDirEntry {
     #[must_use]
-    pub fn base(
-        fs: Arc<ImfsInner>,
-        node_id: NodeId,
-        path: Utf8UnixPathBuf,
-    ) -> Box<dyn VfsDirEntry> {
-        Box::new(Self {
+    pub fn new(fs: Arc<ImfsInner>, node_id: NodeId, path: Utf8UnixPathBuf) -> ImfsDirEntry {
+        Self {
             depth: 0,
             fs,
             node_id,
             path,
-        })
-    }
-
-    #[must_use]
-    pub fn nested(
-        depth: usize,
-        fs: Arc<ImfsInner>,
-        node_id: NodeId,
-        path: Utf8UnixPathBuf,
-    ) -> Box<dyn VfsDirEntry> {
-        Box::new(Self {
-            depth,
-            fs,
-            node_id,
-            path,
-        })
+        }
     }
 }
 
@@ -545,97 +575,74 @@ impl VfsDirEntry for ImfsDirEntry {
 /// An iterator that walks a directory tree or a single file recursively.
 pub struct ImfsWalkDir {
     fs: Arc<ImfsInner>,
-    stack: Vec<WalkDirStackNode>,
-    deferred_error: Option<io::Error>,
-}
-
-struct WalkDirStackNode {
-    id: NodeId,
     depth: usize,
-    name: Option<String>,
-    parent_path: Arc<Utf8UnixPathBuf>,
+    start: Option<Utf8UnixPathBuf>,
+    stack_list: Vec<std::vec::IntoIter<io::Result<ImfsDirEntry>>>,
 }
 
 impl ImfsWalkDir {
     pub(crate) fn new(fs: &Arc<ImfsInner>, root: Utf8TypedPath<'_>) -> io::Result<Self> {
         let root = fs.normalize(root)?;
-        let root_node_id = fs.find_node_id(&root)?;
-        fs.check_perms(root_node_id, ImfsNodeOperation::Read)?;
-
-        let stack = vec![WalkDirStackNode {
-            id: root_node_id,
-            depth: 0,
-            name: None,
-            parent_path: Arc::new(root),
-        }];
-
         Ok(Self {
             fs: fs.clone(),
-            stack,
-            deferred_error: None,
+            depth: 0,
+            start: Some(root.to_path_buf()),
+            stack_list: Vec::new(),
         })
     }
 
-    fn populate(&mut self, id: NodeId, depth: usize, path: Utf8UnixPathBuf) -> io::Result<()> {
-        let node = self.fs.nodes.get(id)?;
-        let Node::Directory(directory) = &*node else {
-            return Ok(());
-        };
+    fn push(&mut self, path: &Utf8UnixPath) -> io::Result<()> {
+        let mut entries = ImfsInner::read_dir(&self.fs, path)?.collect::<Vec<_>>();
+        entries.sort_unstable_by(|a, b| match (a, b) {
+            (Ok(a), Ok(b)) => a.path().cmp(&b.path()),
+            (&Err(..), &Err(..)) => std::cmp::Ordering::Equal,
+            (&Ok(..), &Err(..)) => std::cmp::Ordering::Greater,
+            (&Err(..), &Ok(..)) => std::cmp::Ordering::Less,
+        });
 
-        self.fs.check_perms(id, ImfsNodeOperation::Read)?;
-
-        // Optimize lock contention: clone keys and copy values immediately
-        // to release all DashMap locks/references before sorting.
-        let mut entries: Vec<(String, NodeId)> = directory
-            .children
-            .iter()
-            .map(|entry| (entry.key().clone(), *entry.value()))
-            .collect();
-
-        entries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-
-        // Push children in reverse order so they are popped in alphabetical order.
-        let parent_path = Arc::new(path);
-        let depth = depth
-            .checked_add(1)
-            .ok_or_else(|| io::Error::other("exceeded maximum depth"))?;
-
-        for (name, child_id) in entries.into_iter().rev() {
-            self.stack.push(WalkDirStackNode {
-                id: child_id,
-                depth,
-                name: Some(name),
-                parent_path: parent_path.clone(),
-            });
-        }
-
+        self.stack_list.push(entries.into_iter());
         Ok(())
     }
+}
+
+macro_rules! tri {
+    ($expr:expr) => {{
+        match $expr {
+            Ok(okay) => okay,
+            Err(error) => return Some(Err(error)),
+        }
+    }};
 }
 
 impl Iterator for ImfsWalkDir {
     type Item = io::Result<Box<dyn VfsDirEntry>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(error) = self.deferred_error.take() {
-            return Some(Err(error));
+        if let Some(start) = self.start.take() {
+            tri!(self.push(&start));
         }
 
-        let node = self.stack.pop()?;
-        let path = match &node.name {
-            Some(name) => node.parent_path.join(name),
-            None => (*node.parent_path).clone(),
-        };
+        while !self.stack_list.is_empty() {
+            self.depth = self.stack_list.len();
 
-        if let Err(error) = self.populate(node.id, node.depth, path.clone()) {
-            self.deferred_error = Some(error);
+            let next = self
+                .stack_list
+                .last_mut()
+                .expect("stack should not be empty")
+                .next();
+
+            let Some(next) = next else {
+                self.stack_list.pop().expect("stack should not be empty");
+                continue;
+            };
+
+            let mut entry = tri!(next);
+            entry.depth = self.depth;
+
+            tri!(self.push(&entry.path));
+            return Some(Ok(Box::new(entry)));
         }
 
-        Some(Ok(ImfsDirEntry::nested(
-            node.depth,
-            self.fs.clone(),
-            node.id,
-            path,
-        )))
+        None
     }
 }

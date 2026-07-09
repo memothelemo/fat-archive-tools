@@ -1,13 +1,14 @@
 use fat_checksum::{Checksum, HashFunction};
 use fat_vfs::{
-    FileSystem, Permissions, VfsFile, VfsMetadata, VfsNodeType, VfsOpenOptions, VfsReadDir,
+    FileSystem, Permissions, VfsDirEntry, VfsFile, VfsMetadata, VfsNodeType, VfsOpenOptions,
+    VfsReadDir,
 };
 use std::{fmt, io, sync::Arc};
 use typed_path::{Utf8TypedPath, Utf8TypedPathBuf};
 
 use self::{
     handle::{FileReadHandle, FileWriteHandle, OpenFileMode},
-    inner::{ImfsDirEntry, ImfsInner, ImfsWalkDir},
+    inner::{ImfsInner, ImfsWalkDir},
     node::*,
 };
 
@@ -251,25 +252,13 @@ impl FileSystem for InMemoryFs {
 
     fn read_dir(&self, path: Utf8TypedPath<'_>) -> io::Result<VfsReadDir> {
         let path = self.inner.normalize(path)?;
-        let (node, node_id) = self.inner.find_node(&path)?;
-
-        let directory = node.as_dir()?;
-        self.inner.check_perms(node_id, ImfsNodeOperation::Read)?;
-
-        let mut entries = Vec::new();
-        entries.try_reserve(directory.children.len())?;
-
-        for entry in directory.children.iter() {
-            let entry_id = *entry.value();
-            let entry = self
-                .inner
-                .check_perms(entry_id, ImfsNodeOperation::Read)
-                .map(|_| ImfsDirEntry::base(self.inner.clone(), entry_id, path.join(entry.key())));
-
-            entries.push(entry);
-        }
-
-        Ok(Box::new(entries.into_iter()))
+        let iter: VfsReadDir = Box::new(ImfsInner::read_dir(&self.inner, &path)?.map(|v| {
+            v.map(|v| {
+                let entry: Box<dyn VfsDirEntry> = Box::new(v);
+                entry
+            })
+        }));
+        Ok(iter)
     }
 
     fn read_to_string(&self, path: Utf8TypedPath<'_>) -> io::Result<String> {

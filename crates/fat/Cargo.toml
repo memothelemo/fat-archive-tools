@@ -12,5 +12,4 @@ crossbeam = { workspace = true }
 fat-imfs = { path = "../fat-imfs" }
 fat-stdfs = { path = "../fat-stdfs" }
 fat-vfs = { path = "../fat-vfs" }
-fat-vfs-harness = { path = "../fat-vfs-harness" }
 typed-path = { workspace = true }
