@@ -1,5 +1,5 @@
 [package]
-name = "fat-hasher"
+name = "fat-stdfs"
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,10 +8,7 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-hex = { workspace = true }
-sha2 = "0.11.0"
-thiserror = { workspace = true }
-
-[dependencies.xxhash-rust]
-version = "0.8.15"
-features = ["xxh3"]
+fat-checksum = { path = "../fat-checksum" }
+fat-vfs = { path = "../fat-vfs" }
+typed-path = { workspace = true }
+walkdir = "2.5.0"

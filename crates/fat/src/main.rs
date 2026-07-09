@@ -1,29 +1,10 @@
-use fat_imfs::InMemoryFs;
-use fat_vfs::VfsSnapshotNode;
-use std::io;
+use fat::{WalkConfig, walk};
+use fat_stdfs::OsFileSystem;
+use std::sync::Arc;
 
-fn main() -> io::Result<()> {
-    let snapshot = VfsSnapshotNode::directory()
-        .add(
-            "etc",
-            VfsSnapshotNode::directory()
-                .file("hostname", "stuff")
-                .file("os-release", "Linux")
-                .build(),
-        )
-        .add(
-            "home",
-            VfsSnapshotNode::directory()
-                .add("memo", VfsSnapshotNode::empty_dir())
-                .build(),
-        )
-        .build();
-
-    let fs = InMemoryFs::new();
-    fs.apply_snapshot(&snapshot)?;
-
-    let snapshot = fs.generate_snapshot()?;
-    println!("{snapshot:?}");
-
-    Ok(())
+fn main() {
+    let fs = Arc::new(OsFileSystem::new());
+    let config = WalkConfig::new("/".into());
+    let result = walk(fs, &config);
+    println!("{} entries scanned", result.entries_scanned);
 }

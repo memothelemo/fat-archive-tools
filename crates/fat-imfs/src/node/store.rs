@@ -45,7 +45,7 @@ impl NodeStore {
         }
     }
 
-    /// Vacates every node slot stored temporarily in the store excluding
+    /// Vacates every node slot stored in the store excluding
     /// the root node ID provided in the parameter.
     pub fn clear(&self, root: NodeId) {
         for mut entry in self.nodes.iter_mut() {
@@ -129,6 +129,18 @@ impl NodeStore {
         Ok(())
     }
 
+    /// Gets the total active slots inserted in this store.
+    #[must_use]
+    pub fn active_slots(&self) -> usize {
+        self.nodes.iter().filter(|v| v.value.is_some()).count()
+    }
+
+    /// Gets the total slots inserted in this store.
+    #[must_use]
+    pub fn slots(&self) -> usize {
+        self.nodes.len()
+    }
+
     fn find_available_entry(&self) -> io::Result<Entry<'_, usize, NodeSlot>> {
         // Do we have free node indices to recycle?
         if let Some(idx) = self.free_list.pop() {
@@ -179,13 +191,126 @@ impl NodeSlot {
 impl fmt::Debug for NodeSlot {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(node) = self.get() {
-            if f.alternate() {
-                write!(f, "NodeSlot({node:#?})")
-            } else {
-                write!(f, "NodeSlot({node:?})")
-            }
+            fmt::Debug::fmt(&node, f)
         } else {
-            write!(f, "NodeSlot(<vacant>)")
+            f.write_str("<vacant>")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::node::{Node, NodeId, NodeStore};
+    use fat_vfs::VfsNodeType;
+
+    #[test]
+    fn test_clear() {
+        let store = NodeStore::new();
+        let root = store.insert(Node::empty_dir()).unwrap();
+        store.insert(Node::empty_file()).unwrap();
+        store.clear(root);
+
+        // It should have one index in the free list and vacated
+        // one node in the nodes field.
+        assert_eq!(store.free_list.pop(), Some(1));
+        assert_eq!(store.next_idx.load(), 2);
+
+        assert!(store.nodes.get(&0).unwrap().value.is_some());
+        assert!(store.nodes.get(&1).unwrap().value.is_none());
+    }
+
+    #[test]
+    fn test_clear_with_stale_id() {
+        let store = NodeStore::new();
+        store.insert(Node::empty_dir()).unwrap();
+        store.insert(Node::empty_file()).unwrap();
+        store.clear(NodeId {
+            index: 0,
+            generation: 10,
+        });
+
+        // It should have one index in the free list and vacated
+        // two nodes in the nodes field.
+        assert_eq!(store.free_list.len(), 2);
+        assert!(store.nodes.get(&0).unwrap().value.is_none());
+        assert!(store.nodes.get(&1).unwrap().value.is_none());
+    }
+
+    #[test]
+    fn test_get() {
+        let store = NodeStore::new();
+        let node = store.insert(Node::empty_dir()).unwrap();
+
+        let result = store.get(node);
+        assert!(result.is_ok());
+
+        let result = result.unwrap();
+        assert_eq!(result.ty(), VfsNodeType::Directory);
+    }
+
+    #[test]
+    fn test_get_with_stale_id() {
+        let store = NodeStore::new();
+        let staled = store.insert(Node::empty_dir()).unwrap();
+        store.remove(staled).unwrap();
+
+        let new = store.insert(Node::empty_dir()).unwrap();
+        assert_eq!(new.index, 0);
+
+        let result = store.get(staled);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_insert() {
+        // Case: empty node store
+        let store = NodeStore::new();
+        let node1 = store.insert(Node::empty_dir()).unwrap();
+        assert_eq!(node1.index, 0);
+        assert_eq!(node1.generation, 0);
+
+        // Case: at least one had occupied a node slot
+        let node2 = store.insert(Node::empty_file()).unwrap();
+        assert_eq!(node2.index, 1);
+        assert_eq!(node2.generation, 0);
+
+        // Case: one node slot had vacated
+        store.remove(node1).unwrap();
+
+        assert_eq!(store.next_idx.load(), 2);
+        assert_eq!(store.nodes.len(), 2);
+        assert!(!store.free_list.is_empty());
+
+        let file_node = Node::empty_file();
+        file_node.as_file().unwrap().replace(b"Hello!").unwrap();
+
+        let node1 = store.insert(file_node).unwrap();
+        assert_eq!(node1.index, 0);
+        assert_eq!(node1.generation, 1); // got incremented by 1
+    }
+
+    #[test]
+    fn test_remove() {
+        let store = NodeStore::new();
+        let node = store.insert(Node::empty_dir()).unwrap();
+
+        // Remove the existing node successfuly
+        store.remove(node).unwrap();
+
+        assert!(store.nodes.get(&node.index).unwrap().value.is_none());
+        assert_eq!(store.free_list.len(), 1);
+
+        // Attempting to remove a stale node
+        let error = store.remove(node).unwrap_err();
+        assert_eq!(error.to_string(), "stale node");
+
+        // Attempt to remove a node slot index that had not inserted before
+        let node = NodeId {
+            index: 99,
+            generation: 0,
+        };
+
+        let error = store.remove(node).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
     }
 }

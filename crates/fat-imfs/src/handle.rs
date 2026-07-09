@@ -1,4 +1,4 @@
-use fat_vfs::{Metadata, OpenOptions, VfsFileStream};
+use fat_vfs::{VfsFileStream, VfsMetadata, VfsOpenOptions};
 use std::{
     io::{self, Cursor},
     sync::Arc,
@@ -23,7 +23,7 @@ pub struct FileWriteHandle {
 impl FileWriteHandle {
     pub fn new(
         inner: Arc<ImfsInner>,
-        options: &mut OpenOptions,
+        options: &mut VfsOpenOptions,
         node_id: NodeId,
     ) -> io::Result<Self> {
         debug_assert!(options.write, "write must be enabled for FileWriteHandle");
@@ -73,8 +73,8 @@ impl FileWriteHandle {
 }
 
 impl VfsFileStream for FileWriteHandle {
-    fn metadata(&self) -> io::Result<Metadata> {
-        self.inner.metadata_from_node(self.node_id)
+    fn metadata(&self) -> io::Result<VfsMetadata> {
+        self.inner.metadata(self.node_id)
     }
 
     fn sync_data(&mut self) -> io::Result<()> {
@@ -185,8 +185,8 @@ impl FileReadHandle {
 }
 
 impl VfsFileStream for FileReadHandle {
-    fn metadata(&self) -> io::Result<Metadata> {
-        self.inner.metadata_from_node(self.node_id)
+    fn metadata(&self) -> io::Result<VfsMetadata> {
+        self.inner.metadata(self.node_id)
     }
 
     fn sync_data(&mut self) -> io::Result<()> {

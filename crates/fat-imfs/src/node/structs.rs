@@ -1,15 +1,14 @@
 use crossbeam::atomic::AtomicCell;
 use dashmap::DashMap;
-use fat_vfs::{NodeType, Permissions};
+use fat_vfs::{Permissions, VfsNodeType};
 use std::{
-    io,
+    fmt, io,
     sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
 
 use super::NodeId;
 
 /// A file system node, either a directory or a file.
-#[derive(Debug)]
 pub enum Node {
     Directory(DirectoryNode),
     File(FileNode),
@@ -78,10 +77,10 @@ impl Node {
     }
 
     /// Gets the node type.
-    pub fn ty(&self) -> NodeType {
+    pub fn ty(&self) -> VfsNodeType {
         match self {
-            Self::Directory(..) => NodeType::Directory,
-            Self::File(..) => NodeType::File,
+            Self::Directory(..) => VfsNodeType::Directory,
+            Self::File(..) => VfsNodeType::File,
         }
     }
 
@@ -98,6 +97,15 @@ impl Node {
         match self {
             Self::Directory(dir) => dir.permissions.store(permissions),
             Self::File(file) => file.permissions.store(permissions),
+        }
+    }
+}
+
+impl fmt::Debug for Node {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Directory(inner) => fmt::Debug::fmt(&inner, f),
+            Self::File(inner) => fmt::Debug::fmt(&inner, f),
         }
     }
 }

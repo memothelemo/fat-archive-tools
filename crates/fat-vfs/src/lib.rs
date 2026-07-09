@@ -1,108 +1,50 @@
 use bitflags::bitflags;
-use fat_hasher::{Checksum, HashFunction};
-use serde::{Deserialize, Serialize};
+use fat_checksum::{Checksum, HashFunction};
+use std::{any::Any, fmt, io};
 use typed_path::{Utf8TypedPath, Utf8TypedPathBuf};
 
-use ::std::{fmt, io};
+pub type VfsFile = Box<dyn VfsFileStream>;
+pub type VfsReadDir = Box<dyn Iterator<Item = io::Result<Box<dyn VfsDirEntry>>>>;
 
-pub mod snapshot;
-pub mod std;
+pub trait FileSystem: Any + Send + Sync + fmt::Debug {
+    fn current_dir(&self) -> io::Result<Utf8TypedPathBuf>;
 
-pub use self::{snapshot::VfsSnapshotNode, std::OsFileSystem};
-
-/// The core virtual filesystem abstraction.
-pub trait FileSystem: fmt::Debug {
-    /// Creates a new, empty directory at the provided path.
-    ///
-    /// It should replicate the behavior of [`std::fs::create_dir`].
     fn create_dir(&self, path: Utf8TypedPath<'_>) -> io::Result<()>;
-
-    /// Recurisvely create a directory and all of its parent components if they are missing.
-    ///
-    /// It should replicate the behavior of [`std::fs::create_dir_all`].
     fn create_dir_all(&self, path: Utf8TypedPath<'_>) -> io::Result<()>;
-
-    /// Returns `Ok(true)` if the path exists.
-    ///
-    /// It should replicate the behavior of [`std::fs::exists`].
     fn exists(&self, path: Utf8TypedPath<'_>) -> io::Result<bool>;
+    fn join(&self, path: Utf8TypedPath<'_>, name: &str) -> io::Result<Utf8TypedPathBuf>;
 
     /// Calculates a checksum from the contents of a file.
     fn hash(&self, path: Utf8TypedPath<'_>, hasher: Box<dyn HashFunction>) -> io::Result<Checksum>;
 
-    /// Queries the file system to get information about a file, directory, etc.
-    ///
-    /// It should replicate the behavior of [`std::fs::metadata`].
-    fn metadata(&self, path: Utf8TypedPath<'_>) -> io::Result<Metadata>;
-
-    /// Opens a file at `path` with the options specified by [`OpenOptions`]
-    fn open(
-        &self,
-        path: Utf8TypedPath<'_>,
-        options: &mut OpenOptions,
-    ) -> io::Result<Box<dyn VfsFileStream>>;
-
-    /// Reads the entire contents of a file into a byte vector.
-    ///
-    /// It should replicate the behavior of [`std::fs::read`].
+    fn metadata(&self, path: Utf8TypedPath<'_>) -> io::Result<VfsMetadata>;
+    fn open(&self, path: Utf8TypedPath<'_>, options: &mut VfsOpenOptions) -> io::Result<VfsFile>;
     fn read(&self, path: Utf8TypedPath<'_>) -> io::Result<Vec<u8>>;
-
-    /// Returns an iterator over the entries within a directory.
-    ///
-    /// It should replicate the behavior of [`std::fs::read_dir`].
-    fn read_dir(
-        &self,
-        path: Utf8TypedPath<'_>,
-    ) -> io::Result<Box<dyn Iterator<Item = io::Result<Utf8TypedPathBuf>>>>;
-
-    /// Reads the entire contents of a file into a string.
-    ///
-    /// It should replicate the behavior of [`std::fs::read_to_string`].
+    fn read_dir(&self, path: Utf8TypedPath<'_>) -> io::Result<VfsReadDir>;
     fn read_to_string(&self, path: Utf8TypedPath<'_>) -> io::Result<String>;
-
-    /// Renames a file or directory to a new name, replacing the original file
-    /// if `to` already exists.
-    ///
-    /// It should replicate the behavior of [`std::fs::rename`].
     fn rename(&self, from: Utf8TypedPath<'_>, to: Utf8TypedPath<'_>) -> io::Result<()>;
-
-    /// Removes an empty file.
-    ///
-    /// It should replicate the behavior of [`std::fs::remove_file`].
-    fn remove_file(&self, path: Utf8TypedPath<'_>) -> io::Result<()>;
-
-    /// Removes an empty directory.
-    ///
-    /// It should replicate the behavior of [`std::fs::remove_dir`].
     fn remove_dir(&self, path: Utf8TypedPath<'_>) -> io::Result<()>;
-
-    /// Removes a directory at this path, after removing all of its contents.
-    ///
-    /// It should replicate the behavior of [`std::fs::remove_dir_all`].
     fn remove_dir_all(&self, path: Utf8TypedPath<'_>) -> io::Result<()>;
-
-    /// Changes the permissions found on a file or a directory.
-    ///
-    /// It should replicate the behavior of [`std::fs::set_permissions`].
-    fn set_permissions(&self, path: Utf8TypedPath<'_>, permissions: Permissions) -> io::Result<()>;
-
-    /// Creates a new symbolic link on the file system.
-    ///
-    /// It should replicate the behavior of [`std::fs::soft_link`].
+    fn remove_file(&self, path: Utf8TypedPath<'_>) -> io::Result<()>;
+    fn set_current_dir(&self, path: Utf8TypedPath<'_>) -> io::Result<()>;
     fn soft_link(&self, original: Utf8TypedPath<'_>, link: Utf8TypedPath<'_>) -> io::Result<()>;
-
-    /// Writes a slice as the entire contents of a file.
-    ///
-    /// This function will create a file if it does not exist, and will
-    /// entirely replace its contents if it does.
-    ///
-    /// It should replicate the behavior of [`std::fs::write`].
+    fn walkdir(&self, root: Utf8TypedPath<'_>) -> io::Result<VfsReadDir>;
     fn write(&self, path: Utf8TypedPath<'_>, contents: &[u8]) -> io::Result<()>;
+}
+
+pub trait VfsDirEntry {
+    fn depth(&self) -> usize;
+    fn file_name(&self) -> io::Result<String>;
+
+    /// Queries metadata about the underlying entry.
+    fn metadata(&self) -> io::Result<VfsMetadata>;
+    fn node_type(&self) -> io::Result<VfsNodeType>;
+    fn path(&self) -> Utf8TypedPath<'_>;
 }
 
 pub trait VfsFileStream: io::Read + io::Write + io::Seek {
     /// Queries metadata about the underlying file.
-    fn metadata(&self) -> io::Result<Metadata>;
+    fn metadata(&self) -> io::Result<VfsMetadata>;
 
     /// This function sychronizes file contents from the file system.
     fn sync_data(&mut self) -> io::Result<()>;
@@ -111,7 +53,7 @@ pub trait VfsFileStream: io::Read + io::Write + io::Seek {
 /// An OS-agnostic replica of [`std::fs::OpenOptions`] but all of its fields are public.
 #[derive(Clone, Debug)]
 #[must_use = "OpenOptions does nothing, use `.open(..)` to open a file"]
-pub struct OpenOptions {
+pub struct VfsOpenOptions {
     pub append: bool,
     pub create: bool,
     pub create_new: bool,
@@ -120,7 +62,7 @@ pub struct OpenOptions {
     pub write: bool,
 }
 
-impl OpenOptions {
+impl VfsOpenOptions {
     #[expect(
         clippy::new_without_default,
         reason = "std::fs::OpenOptions does not implement Default"
@@ -185,7 +127,7 @@ impl OpenOptions {
 
 /// A common file system node (file/directory) metadata.
 #[derive(Debug)]
-pub struct Metadata {
+pub struct VfsMetadata {
     /// A node permission mode.
     pub mode: Permissions,
 
@@ -193,12 +135,12 @@ pub struct Metadata {
     pub size: u64,
 
     /// A node type.
-    pub ty: NodeType,
+    pub ty: VfsNodeType,
 }
 
-/// Represents the type of a filesystem node.
+/// Represents the type of a file system node.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum NodeType {
+pub enum VfsNodeType {
     /// A regular directory
     Directory,
 
@@ -214,7 +156,7 @@ pub enum NodeType {
 
 bitflags! {
     /// A file system node permission.
-    #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     pub struct Permissions: u16 {
         /// This node has read permission.
         const READ = 0b10;
