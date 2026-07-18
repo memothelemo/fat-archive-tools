@@ -10,6 +10,24 @@ use std::{
 use std::os::unix::fs::{DirEntryExt as _, MetadataExt as _};
 
 /// A directory entry.
+///
+/// This is the expected type of value received from the walker
+/// visitor in this crate.
+///
+/// On Unix systems, this type implements the [`DirEntryExt`]
+/// trait, which provides access to the inode number of the directory
+/// entry.
+///
+/// # Differences with [`std::fs::DirEntry`]
+///
+/// This type mostly mirrors the type by the same name in [`std::fs`],
+/// but there are some differences:
+///
+/// - [`path`] and [`file_name`] return as borrowed types
+///
+/// [`std::fs`]: https://doc.rust-lang.org/stable/std/fs/index.html
+/// [`path`]: DirEntry::path
+/// [`file_name`]: DirEntry::file_name
 pub struct DirEntry {
     path: PathBuf,
 
@@ -135,9 +153,11 @@ impl fmt::Debug for DirEntry {
     }
 }
 
+/// Unix-specific extension methods for [`DirEntry`].
 #[cfg(unix)]
 pub trait DirEntryExt {
-    /// Returns the underlying `d_ino` field in the contained `dirent` structure.
+    /// Returns the underlying `d_ino` field in the contained `dirent`
+    /// structure.
     fn ino(&self) -> u64;
 }
 
