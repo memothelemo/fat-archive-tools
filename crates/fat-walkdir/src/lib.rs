@@ -1,4 +1,3 @@
-// TODO: Implement VFS version of parallel file walker
 use fat_parallel_iter::{ParallelIter, WorkerQueue};
 use std::{
     fs, io,
