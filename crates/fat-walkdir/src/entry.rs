@@ -1,4 +1,4 @@
-// Copied from:
+// Copied from: https://github.com/BurntSushi/walkdir/blob/master/src/dent.rs
 use cfg_if::cfg_if;
 use std::{
     ffi::OsStr,
@@ -7,7 +7,7 @@ use std::{
 };
 
 #[cfg(unix)]
-use std::os::unix::fs::{DirEntryExt, MetadataExt};
+use std::os::unix::fs::{DirEntryExt as _, MetadataExt as _};
 
 /// A directory entry.
 pub struct DirEntry {

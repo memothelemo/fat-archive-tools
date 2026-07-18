@@ -1,4 +1,4 @@
-// The entire implementation is inspired by:
+// The entire implementation of ParallelIter is inspired by:
 // https://github.com/BurntSushi/ripgrep/blob/master/crates/ignore/src/walk.rs
 use crossbeam::{
     atomic::AtomicCell,
@@ -20,7 +20,7 @@ impl<T: Send> ParallelIter<T> {
     pub fn new(iter: impl Iterator<Item = T> + 'static) -> Self {
         Self {
             iter: Box::new(iter),
-            threads: NonZeroUsize::new(1).expect("1 is not zero").get(),
+            threads: NonZeroUsize::new(1).expect("one is not zero").get(),
         }
     }
 
@@ -67,36 +67,34 @@ fn acquire_from_queue<T>(
 where
     T: Send,
 {
+    if abort.load() {
+        return None;
+    }
+
+    if let Some(value) = queue.pop() {
+        return Some(value);
+    }
+
+    busy_workers.fetch_sub(1);
+
+    // Check if we have other busy workers at the moment
+    if busy_workers.load() == 0 {
+        abort.store(true);
+        return None;
+    }
+
+    // If we do have one, wait until there's a new one we can steal.
     loop {
         if abort.load() {
             return None;
         }
 
         if let Some(value) = queue.pop() {
+            busy_workers.fetch_add(1);
             return Some(value);
         }
 
-        busy_workers.fetch_sub(1);
-
-        // Check if we have other busy workers at the moment
-        if busy_workers.load() == 0 {
-            abort.store(true);
-            return None;
-        }
-
-        // If we do have one, wait until there's a new one we can steal.
-        loop {
-            if abort.load() {
-                return None;
-            }
-
-            if let Some(value) = queue.pop() {
-                busy_workers.fetch_add(1);
-                return Some(value);
-            }
-
-            std::thread::sleep(Duration::from_millis(1));
-        }
+        std::thread::sleep(Duration::from_millis(1));
     }
 }
 

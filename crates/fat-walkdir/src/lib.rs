@@ -26,15 +26,6 @@ impl Walker {
         Self::from_iter([path])
     }
 
-    /// Creates a new `Walker` initialized with an iterator of root paths.
-    pub fn from_iter<P: AsRef<Path>, I: IntoIterator<Item = P>>(paths: I) -> Self {
-        let mut walker = Self::empty();
-        for path in paths.into_iter() {
-            walker = walker.add(path);
-        }
-        walker
-    }
-
     /// Creates a new, empty `Walker` with no root paths.
     pub fn empty() -> Self {
         Self {
@@ -44,6 +35,10 @@ impl Walker {
     }
 
     /// Adds a root path to the walker.
+    #[expect(
+        clippy::should_implement_trait,
+        reason = "this function is for configuring a directory walker"
+    )]
     pub fn add<P: AsRef<Path>>(mut self, path: P) -> Self {
         self.paths.push(path.as_ref().to_path_buf());
         self
@@ -58,7 +53,7 @@ impl Walker {
     /// Recursively visits all paths, invoking the `visitor` callback for each entry found.
     ///
     /// The visitation is parallelized across the configured thread pool.
-    pub fn visit<V: WalkVisitor + Clone>(&mut self, visitor: &V) {
+    pub fn visit<V: WalkerVisitor + Clone>(&mut self, visitor: &V) {
         // Initial queue for paths to descend.
         let mut messages = Vec::new();
         let mut paths = Vec::new();
@@ -97,17 +92,27 @@ impl Walker {
     }
 }
 
+impl<P: AsRef<Path>> FromIterator<P> for Walker {
+    fn from_iter<T: IntoIterator<Item = P>>(iter: T) -> Self {
+        let mut walker = Self::empty();
+        for path in iter.into_iter() {
+            walker = walker.add(path);
+        }
+        walker
+    }
+}
+
 /// A trait representing a visitor for directory walking.
-pub trait WalkVisitor: Send + Sync {
+pub trait WalkerVisitor: Send + Sync {
     /// Visits a directory entry, or handles an I/O error encountered during traversal.
     ///
     /// Returns a [`WalkerAction`] to control the future execution of the directory walker.
     fn visit(&self, entry: io::Result<DirEntry>) -> WalkerAction;
 }
 
-impl<T> WalkVisitor for std::sync::Arc<T>
+impl<T> WalkerVisitor for std::sync::Arc<T>
 where
-    T: WalkVisitor,
+    T: WalkerVisitor,
 {
     fn visit(&self, entry: io::Result<DirEntry>) -> WalkerAction {
         (**self).visit(entry)
@@ -148,7 +153,7 @@ impl WalkerAction {
     }
 }
 
-fn visit_entry<V: WalkVisitor>(
+fn visit_entry<V: WalkerVisitor>(
     queue: &WorkerQueue<DirEntry>,
     visitor: &V,
     entry: DirEntry,

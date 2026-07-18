@@ -2,7 +2,7 @@ use crossbeam::atomic::AtomicCell;
 use dashmap::DashMap;
 use fat_checksum::{Blake3, Checksum, HashFunction};
 use fat_parallel_iter::ParallelIter;
-use fat_walkdir::{DirEntry, WalkVisitor, Walker, WalkerAction};
+use fat_walkdir::{DirEntry, Walker, WalkerAction, WalkerVisitor};
 use std::{
     collections::HashMap,
     fs,
@@ -20,7 +20,7 @@ struct SimpleVisitor {
     progress: Arc<AtomicUsize>,
 }
 
-impl WalkVisitor for SimpleVisitor {
+impl WalkerVisitor for SimpleVisitor {
     fn visit(&self, entry: io::Result<DirEntry>) -> WalkerAction {
         let Ok(entry) = entry else {
             return WalkerAction::Continue;
