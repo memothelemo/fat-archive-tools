@@ -1,13 +1,14 @@
 use fat_checksum::{Checksum, HashFunction};
 use fat_vfs::{FileSystem, Permissions, VfsMetadata, VfsReadDir};
-use std::{env, fs, io};
+use std::{
+    env, fs,
+    io::{self, BufReader},
+};
 use typed_path::{Utf8TypedPath, Utf8TypedPathBuf};
 use walkdir::WalkDir;
 
-mod internal;
-use crate::internal::OsReadDir;
-
-use self::internal::{OsFileHandle, OsWalkDirEntry, file_type_to_vfs};
+mod handle;
+use crate::handle::{OsFileHandle, OsReadDir, OsWalkDirEntry, file_type_to_vfs};
 
 /// A [`FileSystem`] driver that implements transparently with [`std::fs`].
 #[derive(Debug)]
@@ -64,7 +65,12 @@ impl FileSystem for OsFileSystem {
     ) -> io::Result<Checksum> {
         ensure_path_is_absolute!(path);
 
-        let mut file = fs::File::open(path.as_str())?;
+        let mut file = BufReader::with_capacity(64 * 1024, {
+            let file = fs::File::open(path.as_str())?;
+            #[cfg(target_os = "linux")]
+            let _ = rustix::fs::fadvise(&file, 0, None, rustix::fs::Advice::Sequential);
+            file
+        });
         std::io::copy(&mut file, &mut hasher)?;
 
         Ok(hasher.digest())
@@ -137,7 +143,7 @@ impl FileSystem for OsFileSystem {
     }
 
     #[cfg(windows)]
-    fn soft_link(&self, original: Utf8TypedPath<'_>, link: Utf8TypedPath<'_>) -> io::Result<()> {
+    fn soft_link(&self, _original: Utf8TypedPath<'_>, _link: Utf8TypedPath<'_>) -> io::Result<()> {
         todo!()
     }
 

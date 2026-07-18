@@ -1,0 +1,13 @@
+[package]
+name = "fat-walkdir"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+cfg-if = "1.0.4"
+crossbeam = { workspace = true }
+fat-parallel-iter = { path = "../fat-parallel-iter" }

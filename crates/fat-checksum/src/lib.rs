@@ -1,9 +1,11 @@
 use std::{fmt, ops::Deref};
 use thiserror::Error;
 
+mod blake3;
 mod sha256;
 mod xxh3;
 
+pub use ::blake3::Hasher as Blake3;
 pub use ::sha2::Sha256;
 pub use ::xxhash_rust::xxh3::Xxh3;
 
